@@ -1,12 +1,30 @@
 import argparse
 import os
+import re
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+import iFeatureOmegaCLI
 import numpy as np
 
 ESM_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ESM_Pre_model")
 STANDARD = {"rna": set("ACGU"), "protein": set("ACDEFGHIKLMNPQRSTVWY")}
+
+
+def rna_sequence_type(self):
+    for record in self.fasta_list:
+        record[1] = record[1].replace("N", "-")
+    return iFeatureOmegaCLI.Sequence.check_sequence_type(self)
+
+
+def protein_sequence_type(self):
+    for record in self.fasta_list:
+        record[1] = re.sub("[^ACDEFGHIKLMNPQRSTVWY]", "-", record[1])
+    return iFeatureOmegaCLI.Sequence.check_sequence_type(self)
+
+
+iFeatureOmegaCLI.iRNA.check_sequence_type = rna_sequence_type
+iFeatureOmegaCLI.iProtein.check_sequence_type = protein_sequence_type
 
 
 def read_records(path):
