@@ -5,7 +5,7 @@ import sys
 import time
 
 from Model import *
-from ciceklab_common import SPLITS, METRICS, build_model, load_ciceklab
+from ciceklab_common import SPLITS, METRICS, build_model, encode_all, load_ciceklab
 
 CONFIGS = {
     "code": {"num_epochs": 3000, "alpha": 0.4, "lr_step": False},
@@ -13,7 +13,7 @@ CONFIGS = {
 }
 
 
-def train_and_validate(model, train_data, feature, valid, optimizer, scheduler, num_epochs, alpha, run_dir):
+def train_and_validate(model, train_data, extra_x, valid, optimizer, scheduler, num_epochs, alpha, run_dir):
     best_acc = {s: 0 for s in SPLITS}
     best_state = {s: None for s in SPLITS}
     best_epoch = {s: None for s in SPLITS}
@@ -31,7 +31,7 @@ def train_and_validate(model, train_data, feature, valid, optimizer, scheduler, 
             model.eval()
             row = []
             with torch.no_grad():
-                z = model.encoder(feature, train_data.edge_index)
+                z = encode_all(model, train_data, extra_x)
                 for s in SPLITS:
                     metrics = model.test(z, *valid[f"valid_{s}"])
                     if metrics[2] > best_acc[s]:
@@ -75,7 +75,7 @@ if __name__ == '__main__':
 
     device = torch.device(args.device)
     set_seed(args.seed)
-    feature, train_data, eval_data = load_ciceklab(args.processed, device)
+    extra_x, train_data, eval_data = load_ciceklab(args.processed, device)
 
     num_pos_train = train_data.pos_edge_label_index.size(1)
     train_neg = train_data.neg_edge_label_index
@@ -91,7 +91,7 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=5e-5)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.95) if config["lr_step"] else None
 
-    best_state, best_epoch = train_and_validate(model, train_data, feature, eval_data, optimizer, scheduler, config["num_epochs"], config["alpha"], run_dir)
+    best_state, best_epoch = train_and_validate(model, train_data, extra_x, eval_data, optimizer, scheduler, config["num_epochs"], config["alpha"], run_dir)
 
     results = []
     for s in SPLITS:
@@ -100,7 +100,7 @@ if __name__ == '__main__':
         with torch.no_grad():
             z_train = model.encoder(train_data.x, train_data.edge_index)
             train_metrics = model.test(z_train, train_data.pos_edge_label_index, train_neg)
-            z = model.encoder(feature, train_data.edge_index)
+            z = encode_all(model, train_data, extra_x)
             valid_metrics = model.test(z, *eval_data[f"valid_{s}"])
 
         train_auc, train_ap, train_acc, train_sen, train_pre, train_spe, train_f1, train_mcc = train_metrics

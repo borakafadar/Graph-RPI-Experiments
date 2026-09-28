@@ -10,6 +10,7 @@ source ~/miniconda3/etc/profile.d/conda.sh
 conda activate graphrpi
 set -ux
 export CUDA_VISIBLE_DEVICES="${GPU_ID:-0}"
+export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 hostname
 nvidia-smi
 python Graph-RPI-Model/main_ciceklab.py --config paper --neg random --epochs 2 --run-dir ciceklab_processed/runs/smoke

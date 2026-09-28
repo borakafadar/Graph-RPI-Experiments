@@ -5,7 +5,7 @@ import os
 
 import torch
 
-from ciceklab_common import SPLITS, METRICS, build_model, load_ciceklab
+from ciceklab_common import SPLITS, METRICS, build_model, encode_all, load_ciceklab
 
 
 def main():
@@ -20,7 +20,7 @@ def main():
         raise SystemExit(f"{out} already exists: the test set has already been evaluated for this run")
 
     device = torch.device(args.device)
-    feature, train_data, eval_data = load_ciceklab(args.processed, device)
+    extra_x, train_data, eval_data = load_ciceklab(args.processed, device)
     with open(os.path.join(args.processed, "data", "prepare_stats.json")) as fh:
         stats = json.load(fh)
 
@@ -30,7 +30,7 @@ def main():
         model.load_state_dict(torch.load(os.path.join(args.run_dir, f"best_model_valid_{s}.pth"), map_location=device))
         model.eval()
         with torch.no_grad():
-            z = model.encoder(feature, train_data.edge_index)
+            z = encode_all(model, train_data, extra_x)
             metrics = model.test(z, *eval_data[f"test_{s}"])
         pos, neg = eval_data[f"test_{s}"]
         dropped = stats[f"test_{s}"]["dropped_rows_missing_sequence"]

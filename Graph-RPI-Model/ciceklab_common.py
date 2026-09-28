@@ -73,9 +73,11 @@ def load_features(processed_dir, graph):
 
 def load_ciceklab(processed_dir, device):
     graph = torch.load(os.path.join(processed_dir, "data", "graph.pt"))
-    feature = load_features(processed_dir, graph).to(device)
+    feature = load_features(processed_dir, graph)
     n_train = graph["n_train_rna"] + graph["n_train_protein"]
-    train_data = Data(x=feature[:n_train], edge_index=to_undirected(graph["train_pos"]).to(device))
+    extra_x = feature[n_train:].clone()
+    train_data = Data(x=feature[:n_train].to(device), edge_index=to_undirected(graph["train_pos"]).to(device))
+    del feature
     train_data.num_rna = graph["n_train_rna"]
     train_data.pos_edge_label_index = graph["train_pos"].to(device)
     train_data.neg_edge_label_index = graph["train_neg"].to(device)
@@ -83,5 +85,14 @@ def load_ciceklab(processed_dir, device):
     for name, split in graph["eval"].items():
         pairs, labels = split["pairs"], split["labels"]
         eval_data[name] = (pairs[:, labels == 1].to(device), pairs[:, labels == 0].to(device))
-    print(f"Nodes: {feature.size(0)} total, {n_train} in the training graph; training edges: {train_data.pos_edge_label_index.size(1)}")
-    return feature, train_data, eval_data
+    print(f"Nodes: {n_train + extra_x.size(0)} total, {n_train} in the training graph; training edges: {train_data.pos_edge_label_index.size(1)}")
+    return extra_x, train_data, eval_data
+
+
+@torch.no_grad()
+def encode_all(model, train_data, extra_x, chunk_size=2 ** 18):
+    z = [model.encoder(train_data.x, train_data.edge_index)]
+    no_edges = train_data.edge_index.new_empty((2, 0))
+    for start in range(0, extra_x.size(0), chunk_size):
+        z.append(model.encoder(extra_x[start:start + chunk_size].to(train_data.x.device), no_edges))
+    return torch.cat(z)
