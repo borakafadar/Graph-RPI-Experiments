@@ -38,10 +38,10 @@ Submit every job **from the repo root**. Logs are written there as `GraphRPI_<jo
 sbatch slurm/01_prepare_data.sbatch
 sbatch slurm/02_extract_features.sbatch
 sbatch slurm/03_train_smoke.sbatch
-CONFIG=paper NEG=random JOBS=2 GPU_ID=0 bash slurm/04_train_chain.sh
-CONFIG=code NEG=random JOBS=10 GPU_ID=1 bash slurm/04_train_chain.sh
-CONFIG=paper NEG=file JOBS=2 GPU_ID=0 bash slurm/04_train_chain.sh
-CONFIG=code NEG=file JOBS=10 GPU_ID=1 bash slurm/04_train_chain.sh
+CONFIG=paper NEG=random JOBS=2 bash slurm/04_train_chain.sh
+CONFIG=code NEG=random JOBS=10 bash slurm/04_train_chain.sh
+CONFIG=paper NEG=file JOBS=2 bash slurm/04_train_chain.sh
+CONFIG=code NEG=file JOBS=10 bash slurm/04_train_chain.sh
 sbatch --export=ALL,RUN=paper_random,GPU_ID=0 slurm/05_test.sbatch
 ```
 
@@ -60,10 +60,13 @@ What each step does:
      - `04_train.sbatch` passes `--resume`, so each job continues after the last saved epoch. A job stopped by the time limit loses at most the epoch in progress. `history.csv` is cut back to the saved epoch before training continues.
      - A resumed run gives the same history, checkpoints and `valid_results.csv` as an uninterrupted one (checked on a small graph, CPU and GPU, `random` and `file`).
      - Jobs left over after the run has finished exit immediately.
-   - `--resume` refuses to start in a run directory that has `history.csv` but no `last_state.pt`, e.g. a run from before resume support. Move that directory away first.
-   - The `GPU_ID` parameter:
-     - `--gres` does not work on this cluster, so choose the GPU with `GPU_ID` (0 or 1).
-     - Two jobs that land on the same node must use different `GPU_ID`s.
+   - `--resume` refuses to start in a run directory that has epochs in `history.csv` but no `last_state.pt`, e.g. a run from before resume support. Move that directory away first. A `history.csv` with only the header (a job that crashed during its first epoch) does not block; the run starts from epoch 1.
+   - GPU choice:
+     - Slurm on this cluster does not manage GPUs (no GRES), so jobs of other users share the same cards. A run needs about 19 GiB of the 24 GiB card (peak 18.79 GiB on job 13289), so any other process holding more than about 4.5 GiB on that card causes CUDA OOM.
+     - `04_train.sbatch` therefore picks, at start, a GPU with at least `MIN_FREE_MB` (default 20480) MiB free. If none has, it prints the GPU usage and retries every 60 s. The wait counts towards the 12 h limit.
+     - Two of your own jobs on the same node never pick the same GPU: the chosen GPU is claimed in `/tmp/graphrpi_gpu_claims_$USER/` on the node for as long as the job runs.
+     - Set `GPU_ID=0` or `GPU_ID=1` to only consider that GPU.
+     - Another process can still take memory after the job has started. The job then fails with CUDA OOM and the next job in the chain resumes after the last finished epoch.
 5. **`05_test`** scores the test splits once per run (`RUN` = `<config>_<neg>`).
    - It refuses to run again if `test_results.csv` already exists.
    - Run it only after model selection is final.

@@ -121,7 +121,9 @@ if __name__ == '__main__':
             sys.exit(0)
         print(f"Resuming {run_dir} after epoch {state['epoch']}")
     elif args.resume and os.path.exists(os.path.join(run_dir, "history.csv")):
-        sys.exit(f"{run_dir} has history.csv but no last_state.pt; move it away or choose another --run-dir")
+        with open(os.path.join(run_dir, "history.csv"), newline="") as fh:
+            if len(list(csv.reader(fh))) > 1:
+                sys.exit(f"{run_dir} has epochs in history.csv but no last_state.pt; move it away or choose another --run-dir")
     with open(os.path.join(run_dir, "config.json"), "w") as fh:
         json.dump({"argv": sys.argv, "args": vars(args), "hyperparameters": config, "lr": 1e-3, "weight_decay": 5e-5, "mask_p": 0.4}, fh, indent=2)
     print(f"Run dir: {run_dir}\nConfig: {config}")
