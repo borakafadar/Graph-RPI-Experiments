@@ -38,10 +38,10 @@ Submit every job **from the repo root**. Logs are written there as `GraphRPI_<jo
 sbatch slurm/01_prepare_data.sbatch
 sbatch slurm/02_extract_features.sbatch
 sbatch slurm/03_train_smoke.sbatch
-sbatch --export=ALL,CONFIG=paper,NEG=random,GPU_ID=0 slurm/04_train.sbatch
-sbatch --export=ALL,CONFIG=code,NEG=random,GPU_ID=1 slurm/04_train.sbatch
-sbatch --export=ALL,CONFIG=paper,NEG=file,GPU_ID=0 slurm/04_train.sbatch
-sbatch --export=ALL,CONFIG=code,NEG=file,GPU_ID=1 slurm/04_train.sbatch
+CONFIG=paper NEG=random JOBS=2 GPU_ID=0 bash slurm/04_train_chain.sh
+CONFIG=code NEG=random JOBS=10 GPU_ID=1 bash slurm/04_train_chain.sh
+CONFIG=paper NEG=file JOBS=2 GPU_ID=0 bash slurm/04_train_chain.sh
+CONFIG=code NEG=file JOBS=10 GPU_ID=1 bash slurm/04_train_chain.sh
 sbatch --export=ALL,RUN=paper_random,GPU_ID=0 slurm/05_test.sbatch
 ```
 
@@ -54,6 +54,13 @@ What each step does:
    - Finished shards are kept, so a resubmitted job continues where it stopped.
 3. **`03_train_smoke`** runs 2 epochs of the `paper` / `random` setting. The log shows the peak GPU memory, the time per epoch and the estimated hours for both hyperparameter sets. Check that the run fits within the 12 h limit before submitting step 4.
 4. **`04_train`** runs one training per `CONFIG` × `NEG` combination.
+   - A full run does not fit in one 12 h job (about 124 s per epoch on job 13289: `paper` ≈ 17 h, `code` ≈ 103 h). The run is split into chained jobs:
+     - `04_train_chain.sh` submits `JOBS` copies of `04_train.sbatch`, each with `--dependency=afterany` on the previous one.
+     - After every epoch, `main_ciceklab.py` saves `last_state.pt`: model, optimizer, LR scheduler, best checkpoints so far, and the Python/NumPy/Torch/CUDA RNG states.
+     - `04_train.sbatch` passes `--resume`, so each job continues after the last saved epoch. A job stopped by the time limit loses at most the epoch in progress. `history.csv` is cut back to the saved epoch before training continues.
+     - A resumed run gives the same history, checkpoints and `valid_results.csv` as an uninterrupted one (checked on a small graph, CPU and GPU, `random` and `file`).
+     - Jobs left over after the run has finished exit immediately.
+   - `--resume` refuses to start in a run directory that has `history.csv` but no `last_state.pt`, e.g. a run from before resume support. Move that directory away first.
    - The `GPU_ID` parameter:
      - `--gres` does not work on this cluster, so choose the GPU with `GPU_ID` (0 or 1).
      - Two jobs that land on the same node must use different `GPU_ID`s.
@@ -72,6 +79,7 @@ ciceklab_processed/
     config.json                         arguments and hyperparameters
     history.csv                         per-epoch time, lr, validation AUC/ACC
     best_model_valid_unseen_{pair,protein,rna}.pth
+    last_state.pt                       state after the last finished epoch, used by --resume
     valid_results.csv                   train and validation metrics of each selected checkpoint
     test_results.csv                    written by 05_test
   runs/smoke/                           output of 03_train_smoke
@@ -85,7 +93,7 @@ Added:
 - `Graph-RPI-Model/ciceklab_common.py`: data loader, model builder, and the `RPIFileNegatives` subclass for the `file` runs.
 - `Graph-RPI-Model/main_ciceklab.py`: training driver (the counterpart of `main.py`).
 - `Graph-RPI-Model/ciceklab_test.py`: one-time test evaluation.
-- `slurm/setup_env.sh` and `slurm/01`–`05` job scripts.
+- `slurm/setup_env.sh`, `slurm/01`–`05` job scripts and `slurm/04_train_chain.sh`.
 - `WALKTHROUGH.md`.
 
 Changed: none. `main.py`, `Model.py`, `RNA_feature.py` and `protein_feature.py` are untouched.

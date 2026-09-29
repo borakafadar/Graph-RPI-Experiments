@@ -15,4 +15,4 @@ export CUDA_VISIBLE_DEVICES="${GPU_ID:-0}"
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 hostname
 nvidia-smi
-python Graph-RPI-Model/main_ciceklab.py --config "$CONFIG" --neg "$NEG"
+python Graph-RPI-Model/main_ciceklab.py --config "$CONFIG" --neg "$NEG" --resume

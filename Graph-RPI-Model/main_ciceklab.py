@@ -13,15 +13,57 @@ CONFIGS = {
 }
 
 
-def train_and_validate(model, train_data, extra_x, valid, optimizer, scheduler, num_epochs, alpha, run_dir):
+def save_state(path, epoch, model, optimizer, scheduler, best_acc, best_state, best_epoch, epoch_seconds):
+    state = {
+        "epoch": epoch,
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scheduler": None if scheduler is None else scheduler.state_dict(),
+        "best_acc": best_acc,
+        "best_state": best_state,
+        "best_epoch": best_epoch,
+        "epoch_seconds": epoch_seconds,
+        "rng": (random.getstate(), np.random.get_state(), torch.get_rng_state(), torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None),
+    }
+    torch.save(state, path + ".tmp")
+    os.replace(path + ".tmp", path)
+
+
+def load_state(state, model, optimizer, scheduler):
+    model.load_state_dict(state["model"])
+    optimizer.load_state_dict(state["optimizer"])
+    if scheduler is not None:
+        scheduler.load_state_dict(state["scheduler"])
+    py_rng, np_rng, torch_rng, cuda_rng = state["rng"]
+    random.setstate(py_rng)
+    np.random.set_state(np_rng)
+    torch.set_rng_state(torch_rng)
+    if cuda_rng is not None:
+        torch.cuda.set_rng_state_all(cuda_rng)
+
+
+def train_and_validate(model, train_data, extra_x, valid, optimizer, scheduler, num_epochs, alpha, run_dir, state):
     best_acc = {s: 0 for s in SPLITS}
     best_state = {s: None for s in SPLITS}
     best_epoch = {s: None for s in SPLITS}
     epoch_seconds = []
-    with open(os.path.join(run_dir, "history.csv"), "w", newline="") as fh:
+    start_epoch = 0
+    if state is not None:
+        load_state(state, model, optimizer, scheduler)
+        start_epoch, best_acc, best_state, best_epoch, epoch_seconds = state["epoch"], state["best_acc"], state["best_state"], state["best_epoch"], state["epoch_seconds"]
+        for s in SPLITS:
+            if best_state[s] is not None:
+                torch.save(best_state[s], os.path.join(run_dir, f"best_model_valid_{s}.pth"))
+    history = os.path.join(run_dir, "history.csv")
+    rows = [["epoch", "seconds", "lr"] + [f"valid_{s}_{m}" for s in SPLITS for m in ("AUC", "ACC")]]
+    if start_epoch > 0:
+        with open(history, newline="") as fh:
+            rows += [row for row in list(csv.reader(fh))[1:] if int(row[0]) <= start_epoch]
+    state_path = os.path.join(run_dir, "last_state.pt")
+    with open(history, "w", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["epoch", "seconds", "lr"] + [f"valid_{s}_{m}" for s in SPLITS for m in ("AUC", "ACC")])
-        for epoch in range(num_epochs):
+        writer.writerows(rows)
+        for epoch in range(start_epoch, num_epochs):
             start = time.time()
             lr = optimizer.param_groups[0]["lr"]
             model.train()
@@ -43,9 +85,10 @@ def train_and_validate(model, train_data, extra_x, valid, optimizer, scheduler, 
             epoch_seconds.append(time.time() - start)
             writer.writerow([epoch + 1, f"{epoch_seconds[-1]:.1f}", lr] + [f"{v:.4f}" for v in row])
             fh.flush()
+            save_state(state_path, epoch + 1, model, optimizer, scheduler, best_acc, best_state, best_epoch, epoch_seconds)
             summary = ", ".join(f"{s} ACC={row[2 * i + 1]:.4f}" for i, s in enumerate(SPLITS))
             print(f"Epoch {epoch + 1:04d} ({epoch_seconds[-1]:.1f}s, lr={lr:.2e}): {summary}", flush=True)
-            if epoch == 0 and torch.cuda.is_available():
+            if epoch == start_epoch and torch.cuda.is_available():
                 print(f"Peak GPU memory after first epoch: {torch.cuda.max_memory_allocated() / 2 ** 30:.2f} GiB", flush=True)
     mean_seconds = sum(epoch_seconds) / len(epoch_seconds)
     print(f"Mean epoch time: {mean_seconds:.1f}s -> estimated {mean_seconds * CONFIGS['paper']['num_epochs'] / 3600:.1f}h for 'paper', {mean_seconds * CONFIGS['code']['num_epochs'] / 3600:.1f}h for 'code'")
@@ -62,6 +105,7 @@ if __name__ == '__main__':
     parser.add_argument("--epochs", type=int)
     parser.add_argument("--seed", type=int, default=2024)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
 
     config = dict(CONFIGS[args.config])
@@ -69,6 +113,15 @@ if __name__ == '__main__':
         config["num_epochs"] = args.epochs
     run_dir = args.run_dir or os.path.join(args.processed, "runs", f"{args.config}_{args.neg}")
     os.makedirs(run_dir, exist_ok=True)
+    state = None
+    if args.resume and os.path.exists(os.path.join(run_dir, "last_state.pt")):
+        state = torch.load(os.path.join(run_dir, "last_state.pt"), map_location="cpu")
+        if state["epoch"] >= config["num_epochs"] and os.path.exists(os.path.join(run_dir, "valid_results.csv")):
+            print(f"{run_dir} already finished {state['epoch']} epochs, nothing to do")
+            sys.exit(0)
+        print(f"Resuming {run_dir} after epoch {state['epoch']}")
+    elif args.resume and os.path.exists(os.path.join(run_dir, "history.csv")):
+        sys.exit(f"{run_dir} has history.csv but no last_state.pt; move it away or choose another --run-dir")
     with open(os.path.join(run_dir, "config.json"), "w") as fh:
         json.dump({"argv": sys.argv, "args": vars(args), "hyperparameters": config, "lr": 1e-3, "weight_decay": 5e-5, "mask_p": 0.4}, fh, indent=2)
     print(f"Run dir: {run_dir}\nConfig: {config}")
@@ -91,7 +144,7 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=5e-5)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.95) if config["lr_step"] else None
 
-    best_state, best_epoch = train_and_validate(model, train_data, extra_x, eval_data, optimizer, scheduler, config["num_epochs"], config["alpha"], run_dir)
+    best_state, best_epoch = train_and_validate(model, train_data, extra_x, eval_data, optimizer, scheduler, config["num_epochs"], config["alpha"], run_dir, state)
 
     results = []
     for s in SPLITS:
