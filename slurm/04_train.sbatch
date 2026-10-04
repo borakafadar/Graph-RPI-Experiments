@@ -2,19 +2,20 @@
 #SBATCH --job-name=GraphRPI
 #SBATCH --partition=GPU_nvrtx4090
 #SBATCH --time=12:00:00
-#SBATCH --output=%x_%j.txt
+#SBATCH --output=GraphRPI_train.txt
+#SBATCH --open-mode=append
 
 set -eo pipefail
 cd "$SLURM_SUBMIT_DIR"
+echo "===== job $SLURM_JOB_ID started $(date '+%F %T') on $(hostname)"
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate graphrpi
 CONFIG="${CONFIG:?set CONFIG=paper or CONFIG=code}"
 NEG="${NEG:?set NEG=random or NEG=file}"
-MIN_FREE_MB="${MIN_FREE_MB:-20480}"
+MIN_FREE_MB="${MIN_FREE_MB:-22528}"
 CLAIMS="/tmp/graphrpi_gpu_claims_$USER"
 mkdir -p "$CLAIMS"
 exec 9>"$CLAIMS/lock"
-hostname
 while true; do
     flock 9
     GPU=""

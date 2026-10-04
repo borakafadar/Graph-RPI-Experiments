@@ -32,7 +32,7 @@ The `ciceklab/` dataset folder must be at the repo root.
 
 ## 1. Submit the jobs
 
-Submit every job **from the repo root**. Logs are written there as `GraphRPI_<jobid>.txt`. Run the steps in order and check each log before moving on.
+Submit every job **from the repo root**. Logs are appended there, one file per step: `GraphRPI_prepare.txt`, `GraphRPI_features.txt`, `GraphRPI_smoke.txt`, `GraphRPI_train_<config>_<neg>.txt` and `GraphRPI_test.txt`. Each job starts its part with a `===== job <jobid> started <time> on <node>` line. Times are the node's clock: gpu3 prints Turkish time, gpu4 prints UTC (3 h behind `sacct`). Run the steps in order and check each log before moving on.
 
 ```bash
 sbatch slurm/01_prepare_data.sbatch
@@ -62,8 +62,8 @@ What each step does:
      - Jobs left over after the run has finished exit immediately.
    - `--resume` refuses to start in a run directory that has epochs in `history.csv` but no `last_state.pt`, e.g. a run from before resume support. Move that directory away first. A `history.csv` with only the header (a job that crashed during its first epoch) does not block; the run starts from epoch 1.
    - GPU choice:
-     - Slurm on this cluster does not manage GPUs (no GRES), so jobs of other users share the same cards. A run needs about 19 GiB of the 24 GiB card (peak 18.79 GiB on job 13289), so any other process holding more than about 4.5 GiB on that card causes CUDA OOM.
-     - `04_train.sbatch` therefore picks, at start, a GPU with at least `MIN_FREE_MB` (default 20480) MiB free. If none has, it prints the GPU usage and retries every 60 s. The wait counts towards the 12 h limit.
+     - Slurm on this cluster does not manage GPUs (no GRES), so jobs of other users share the same cards. A run needs about 20.3 GiB of the 23.5 GiB usable on the card: up to 19.34 GiB reserved by PyTorch plus the CUDA context. Any other process holding more than about 3 GiB on that card causes CUDA OOM. Job 13824 picked a GPU on which another process held 3.4 GiB, finished epoch 1 and ran out of memory in epoch 2.
+     - `04_train.sbatch` therefore picks, at start, a GPU with at least `MIN_FREE_MB` (default 22528, i.e. 22 GiB) MiB free. If none has, it prints the GPU usage and retries every 60 s. The wait counts towards the 12 h limit.
      - Two of your own jobs on the same node never pick the same GPU: the chosen GPU is claimed in `/tmp/graphrpi_gpu_claims_$USER/` on the node for as long as the job runs.
      - Set `GPU_ID=0` or `GPU_ID=1` to only consider that GPU.
      - Another process can still take memory after the job has started. The job then fails with CUDA OOM and the next job in the chain resumes after the last finished epoch.
