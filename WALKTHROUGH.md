@@ -42,7 +42,7 @@ CONFIG=paper NEG=random JOBS=2 bash slurm/04_train_chain.sh
 CONFIG=code NEG=random JOBS=10 bash slurm/04_train_chain.sh
 CONFIG=paper NEG=file JOBS=2 bash slurm/04_train_chain.sh
 CONFIG=code NEG=file JOBS=10 bash slurm/04_train_chain.sh
-sbatch --export=ALL,RUN=paper_random,GPU_ID=0 slurm/05_test.sbatch
+sbatch --partition=CPU_himem --cpus-per-task=8 --mem=64G --export=ALL,RUN=paper_random,DEVICE=cpu slurm/05_test.sbatch
 ```
 
 What each step does:
@@ -72,6 +72,7 @@ What each step does:
 5. **`05_test`** scores the test splits once per run (`RUN` = `<config>_<neg>`).
    - It refuses to run again if `test_results.csv` already exists.
    - Run it only after model selection is final.
+   - `DEVICE=cpu` runs it on a CPU node, as in the command above, so it does not compete for the shared GPUs. Without `DEVICE` it uses `cuda` on GPU `GPU_ID` (default 0), which has no free-memory check.
 
 ## Outputs
 

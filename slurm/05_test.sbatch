@@ -12,6 +12,12 @@ source ~/miniconda3/etc/profile.d/conda.sh
 conda activate graphrpi
 set -ux
 RUN="${RUN:?set RUN to a run name, e.g. RUN=paper_random}"
-export CUDA_VISIBLE_DEVICES="${GPU_ID:-0}"
-nvidia-smi
-python Graph-RPI-Model/ciceklab_test.py --run-dir "ciceklab_processed/runs/$RUN"
+DEVICE="${DEVICE:-cuda}"
+if [[ "$DEVICE" == cuda ]]; then
+    export CUDA_VISIBLE_DEVICES="${GPU_ID:-0}"
+    nvidia-smi
+else
+    export CUDA_VISIBLE_DEVICES=""
+    export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
+fi
+python Graph-RPI-Model/ciceklab_test.py --run-dir "ciceklab_processed/runs/$RUN" --device "$DEVICE"
